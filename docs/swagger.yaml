@@ -1,0 +1,224 @@
+basePath: /api/v1
+definitions:
+  handlers.AuthResponse:
+    description: Response structure for access token
+    properties:
+      access_token:
+        type: string
+    type: object
+  handlers.SignInInput:
+    description: Input structure for user login
+    properties:
+      email:
+        type: string
+      password:
+        maxLength: 100
+        minLength: 8
+        type: string
+    required:
+    - email
+    - password
+    type: object
+  handlers.SignUpInput:
+    description: Input structure for user signup
+    properties:
+      email:
+        type: string
+      firstname:
+        maxLength: 64
+        minLength: 2
+        type: string
+      lastname:
+        maxLength: 64
+        minLength: 2
+        type: string
+      password:
+        maxLength: 100
+        minLength: 8
+        type: string
+    required:
+    - email
+    - firstname
+    - lastname
+    - password
+    type: object
+  handlers.SignUpResponse:
+    description: Response structure for userId
+    properties:
+      user_id:
+        type: integer
+    type: object
+  handlers.VerifyParams:
+    description: Input structure for verification
+    properties:
+      code:
+        type: string
+      user_id:
+        type: string
+    required:
+    - code
+    - user_id
+    type: object
+  utils.Response:
+    description: Response structure for messages
+    properties:
+      message:
+        type: string
+    type: object
+host: localhost:8080
+info:
+  contact: {}
+  title: User Chat App API
+  version: "1.0"
+paths:
+  /auth/refresh:
+    post:
+      consumes:
+      - application/json
+      description: Refreshes the user's access token by verifying the refresh token
+        from the user's cookies. If the token is valid, a new access token and refresh
+        token are issued to continue the user's session.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Tokens refreshed successfully with a new access token
+          schema:
+            $ref: '#/definitions/handlers.AuthResponse'
+        "400":
+          description: Invalid refresh token or missing refresh token in cookies
+          schema:
+            $ref: '#/definitions/utils.Response'
+        "401":
+          description: Invalid or expired refresh token
+          schema:
+            $ref: '#/definitions/utils.Response'
+        "404":
+          description: User session not found
+          schema:
+            $ref: '#/definitions/utils.Response'
+        "500":
+          description: Internal server error while refreshing token or verifying refresh
+            token
+          schema:
+            $ref: '#/definitions/utils.Response'
+      summary: Refresh Authentication Token
+      tags:
+      - Auth
+  /auth/signin:
+    post:
+      consumes:
+      - application/json
+      description: Logs in a user by accepting a SignInInput JSON with the user's
+        email and password. If the credentials are correct and the email is verified,
+        an access token and a refresh token are returned for subsequent authentication
+        requests.
+      parameters:
+      - description: User Signin Input
+        in: body
+        name: signinInput
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.SignInInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Login successful with access token and refresh token
+          schema:
+            $ref: '#/definitions/handlers.AuthResponse'
+        "400":
+          description: Invalid request due to incorrect or missing parameters
+          schema:
+            $ref: '#/definitions/utils.Response'
+        "401":
+          description: Invalid credentials or email not verified
+          schema:
+            $ref: '#/definitions/utils.Response'
+        "404":
+          description: User not found
+          schema:
+            $ref: '#/definitions/utils.Response'
+        "500":
+          description: Internal server error while verifying user or generating tokens
+          schema:
+            $ref: '#/definitions/utils.Response'
+      summary: User Signin
+      tags:
+      - Auth
+  /auth/signup:
+    post:
+      consumes:
+      - application/json
+      description: Registers a new user by accepting a SignupInput JSON with first
+        name, last name, email, and password. If successful, a verification code is
+        sent to the user's email for confirmation.
+      parameters:
+      - description: User Signup Input
+        in: body
+        name: signupInput
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.SignUpInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: User created successfully with a verification code sent to
+            the email
+          schema:
+            $ref: '#/definitions/handlers.SignUpResponse'
+        "400":
+          description: Invalid request due to incorrect or missing parameters
+          schema:
+            $ref: '#/definitions/utils.Response'
+        "409":
+          description: Email already exists
+          schema:
+            $ref: '#/definitions/utils.Response'
+        "500":
+          description: Internal server error while creating user or sending verification
+            code
+          schema:
+            $ref: '#/definitions/utils.Response'
+      summary: User Signup
+      tags:
+      - Auth
+  /auth/verify:
+    post:
+      consumes:
+      - application/json
+      description: Verifies the user's email using the provided user ID and verification
+        code. If the code matches, the user's email is marked as verified and they
+        can access restricted areas.
+      parameters:
+      - description: User Email Verification Input
+        in: body
+        name: verifyParams
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.VerifyParams'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Verification success
+          schema:
+            type: string
+        "400":
+          description: Invalid request due to empty or invalid code
+          schema:
+            $ref: '#/definitions/utils.Response'
+        "404":
+          description: User not found
+          schema:
+            $ref: '#/definitions/utils.Response'
+        "500":
+          description: Internal server error while verifying code or updating user
+            status
+          schema:
+            $ref: '#/definitions/utils.Response'
+      summary: User Email Verification
+      tags:
+      - Auth
+swagger: "2.0"

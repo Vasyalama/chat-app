@@ -1,0 +1,30 @@
+CREATE TABLE Users (
+    id            BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    username      VARCHAR(64) UNIQUE DEFAULT NULL,
+    firstname     VARCHAR(64) NOT NULL,
+    lastname      VARCHAR(64) NOT NULL,
+    email         VARCHAR(255) NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    bio           TEXT DEFAULT NULL,
+    lastOnline   DATETIME DEFAULT NULL,
+    verified      BOOLEAN NOT NULL DEFAULT FALSE,
+    createdAt    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE UserSessions (
+    id            BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    userId       BIGINT UNSIGNED NOT NULL,
+    refreshToken TEXT NOT NULL,
+    expiresAt    DATETIME NOT NULL,
+    createdAt    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (userId) REFERENCES Users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE verifyCodes (
+    id          BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    userId      BIGINT UNSIGNED NOT NULL,
+    code        VARCHAR(4) NOT NULL,
+    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (userId) REFERENCES Users(id) ON DELETE CASCADE
+);
+
