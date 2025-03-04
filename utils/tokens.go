@@ -1,8 +1,10 @@
 package utils
 
 import (
+	"github.com/gin-gonic/gin"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt"
@@ -103,4 +105,31 @@ func VerifyToken(tokenString string, isRefresh bool) (*CustomClaims, error) {
 
 	log.Printf("Invalid token: %v", tokenString)
 	return nil, ErrTokenInvalid
+}
+
+func ExtractUserClaims(c *gin.Context) (*CustomClaims, error) {
+	// Get the Authorization header
+	authHeader := c.GetHeader("Authorization")
+	if authHeader == "" {
+		log.Println("Missing Authorization header")
+		return nil, ErrTokenInvalid
+	}
+
+	// Check if the token is in the format "Bearer <token>"
+	parts := strings.Split(authHeader, " ")
+	if len(parts) != 2 || parts[0] != "Bearer" {
+		log.Println("Invalid Authorization header format")
+		return nil, ErrTokenInvalid
+	}
+
+	tokenString := parts[1]
+
+	// Verify and parse the token
+	claims, err := VerifyToken(tokenString, false) // false means it's an access token, not a refresh token
+	if err != nil {
+		log.Println("Token verification failed:", err)
+		return nil, err
+	}
+
+	return claims, nil
 }

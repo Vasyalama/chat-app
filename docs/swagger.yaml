@@ -48,6 +48,25 @@ definitions:
       user_id:
         type: integer
     type: object
+  handlers.UserProfileResponse:
+    properties:
+      bio:
+        type: string
+      created_at:
+        type: string
+      email:
+        type: string
+      first_name:
+        type: string
+      id:
+        type: integer
+      last_name:
+        type: string
+      last_online:
+        type: string
+      username:
+        type: string
+    type: object
   handlers.VerifyParams:
     description: Input structure for verification
     properties:
@@ -221,4 +240,34 @@ paths:
       summary: User Email Verification
       tags:
       - Auth
+  /user/profile:
+    get:
+      consumes:
+      - application/json
+      description: Fetches the user's profile information using the ID extracted from
+        the JWT access token.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: User profile retrieved successfully
+          schema:
+            $ref: '#/definitions/handlers.UserProfileResponse'
+        "401":
+          description: Unauthorized - Invalid or missing token
+          schema:
+            $ref: '#/definitions/utils.Response'
+        "404":
+          description: User not found
+          schema:
+            $ref: '#/definitions/utils.Response'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/utils.Response'
+      security:
+      - BearerAuth: []
+      summary: Get User Profile
+      tags:
+      - User
 swagger: "2.0"

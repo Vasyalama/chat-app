@@ -361,3 +361,63 @@ func Refresh(c *gin.Context) {
 
 	c.JSON(http.StatusOK, response)
 }
+
+type UserProfileResponse struct {
+	ID         uint       `json:"id"`
+	Username   *string    `json:"username,omitempty"`
+	FirstName  string     `json:"first_name"`
+	LastName   string     `json:"last_name"`
+	Email      string     `json:"email"`
+	Bio        *string    `json:"bio,omitempty"`
+	LastOnline *time.Time `json:"last_online,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
+}
+
+// GetUserProfile retrieves the user's profile using the user ID from the access token.
+// @Summary Get User Profile
+// @Description Fetches the user's profile information using the ID extracted from the JWT access token.
+// @Tags User
+// @Security BearerAuth
+// @Accept json
+// @Produce json
+// @Success 200 {object} UserProfileResponse "User profile retrieved successfully"
+// @Failure 401 {object} utils.Response "Unauthorized - Invalid or missing token"
+// @Failure 404 {object} utils.Response "User not found"
+// @Failure 500 {object} utils.Response "Internal server error"
+// @Router /user/profile [get]
+func GetUserProfile(c *gin.Context) {
+	claims, exists := c.Get("userClaims")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
+		return
+	}
+
+	userClaims, ok := claims.(*utils.CustomClaims)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse user claims"})
+		return
+	}
+
+	var user models.User
+	err := database.DB.Where("id = ?", userClaims.UserID).First(&user).Error
+	if err != nil {
+		log.Println("User not found:", err)
+		utils.SendResponse(c, http.StatusNotFound, utils.ErrUserNotFound.Error())
+		return
+	}
+
+	// Construct the UserProfileResponse
+	userProfile := UserProfileResponse{
+		ID:         user.ID,
+		Username:   user.Username,
+		FirstName:  user.FirstName,
+		LastName:   user.LastName,
+		Email:      user.Email,
+		Bio:        user.Bio,
+		LastOnline: user.LastOnline,
+		CreatedAt:  user.CreatedAt,
+	}
+
+	// Return the user profile response as JSON
+	c.JSON(http.StatusOK, userProfile)
+}

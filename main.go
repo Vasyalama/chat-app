@@ -11,6 +11,7 @@ import (
 	"user-chat-app/database"
 	_ "user-chat-app/docs"
 	"user-chat-app/handlers"
+	"user-chat-app/middleware"
 	"user-chat-app/models"
 )
 
@@ -61,6 +62,12 @@ func main() {
 			auth.POST("/verify", handlers.Verify)
 			auth.POST("/signin", handlers.Signin)
 			auth.POST("/refresh", handlers.Refresh)
+		}
+		user := apiV1.Group("/user")
+		user.Use(middleware.JWTAuthMiddleware()) // Apply JWT middleware to protect routes
+		{
+			user.GET("/profile", handlers.GetUserProfile) // Fetch user profile
+			//user.PUT("/profile", handlers.UpdateUserProfile) // Update user profile
 		}
 	}
 
