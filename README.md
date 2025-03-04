@@ -16,8 +16,8 @@ To get the project up and running, follow these steps:
 First, clone the repository to your local machine:
 
 ```bash
-git clone <repository-url>
-cd <repository-directory>
+git clone https://github.com/Vasyalama/chat-app.git
+cd chat-app
 ```
 
 ### 2. Edit the .env file with proper environment variables
