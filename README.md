@@ -52,4 +52,15 @@ Once the containers are up and running, you can access the application at:
 ```
 http://localhost:8080
 ```
+api:
+```
+http://localhost:8080/api/v1/
+```
+
+swagger:
+```
+http://localhost:8080/swagger/index.html
+```
+
+
 
