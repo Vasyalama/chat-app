@@ -4,8 +4,11 @@ import (
 	"fmt"
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
+	"gorm.io/gorm"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 	"user-chat-app/database"
@@ -14,15 +17,6 @@ import (
 	"user-chat-app/utils"
 )
 
-// SignUpInput represents the required fields for a signup request
-// @Description Input structure for user signup
-// @Param firstname body string true "First Name" example("John")
-// @Param lastname body string true "Last Name" example("Doe")
-// @Param email body string true "Email" example("john.doe@example.com")
-// @Param password body string true "Password" example("password123")
-// @Success 200 {string} string "User created successfully"
-// @Failure 400 {object} utils.Response "Invalid request"
-// @Router /signup [post]
 type SignUpInput struct {
 	FirstName string `json:"firstname" validate:"required,min=2,max=64"`
 	LastName  string `json:"lastname" validate:"required,min=2,max=64"`
@@ -42,25 +36,6 @@ func ValidateSignUpInput(input SignUpInput) error {
 	return nil
 }
 
-// SignUpResponse is the response structure containing the user id of the signed up user
-// @Description Response structure for userId
-// @Success 200 {object} SignUpResponse "User id response"
-type SignUpResponse struct {
-	UserId int `json:"user_id"`
-}
-
-// Signup handles user registration and sends a verification code to the user's email.
-// @Summary User Signup
-// @Description Registers a new user by accepting a SignupInput JSON with first name, last name, email, and password. If successful, a verification code is sent to the user's email for confirmation.
-// @Tags Auth
-// @Accept json
-// @Produce json
-// @Param signupInput body SignUpInput true "User Signup Input" example({ "firstname": "John", "lastname": "Doe", "email": "john.doe@example.com", "password": "password123" })
-// @Success 201 {object} SignUpResponse "User created successfully with a verification code sent to the email"
-// @Failure 400 {object} utils.Response "Invalid request due to incorrect or missing parameters"
-// @Failure 409 {object} utils.Response "Email already exists"
-// @Failure 500 {object} utils.Response "Internal server error while creating user or sending verification code"
-// @Router /auth/signup [post]
 func Signup(c *gin.Context) {
 	var input SignUpInput
 	if err := c.ShouldBind(&input); err != nil {
@@ -77,11 +52,32 @@ func Signup(c *gin.Context) {
 	user, err := repo.CreateUser(input.FirstName, input.LastName, input.Email, input.Password)
 	if err != nil {
 		if err == utils.ErrEmailAlreadyExists {
+			if !user.Verified {
+				if user.CreatedAt.Add(30 * time.Minute).Before(time.Now()) {
+					database.DB.Delete(&user)
+					goto create
+				}
+				log.Println("user already exsists but is not verified")
+				utils.SendResponse(c, http.StatusBadRequest, utils.ErrUserAlreadyExistsButNotVerified.Error())
+				return
+			}
 			log.Printf("User with email %s already exists", user.Email)
 			utils.SendResponse(c, http.StatusConflict, utils.ErrEmailAlreadyExists.Error())
 			return
 		}
 		utils.SendResponse(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+create:
+	//костыль для разработки
+	if user.Email == "qwerty@gmail.com" {
+		otpCode := 1111
+		otpCode, err = repo.CreateCode(user, otpCode)
+		if err != nil {
+			utils.SendResponse(c, http.StatusInternalServerError, err.Error())
+			return
+		}
+		c.JSON(http.StatusCreated, user)
 		return
 	}
 
@@ -103,43 +99,18 @@ func Signup(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, user.ID)
+	c.JSON(http.StatusCreated, user)
 }
 
-// SignInInput represents the required fields for a sign-in request
-// @Description Input structure for user login
-// @Param email body string true "Email" example("john.doe@example.com")
-// @Param password body string true "Password" example("password123")
-// @Success 200 {object} AuthResponse "Login successful"
-// @Failure 400 {object} utils.Response "Invalid request"
-// @Failure 404 {object} utils.Response "User not found"
-// @Failure 401 {object} utils.Response "Invalid credentials"
-// @Router /signin [post]
 type SignInInput struct {
 	Email    string `json:"email" validate:"required,email"`
 	Password string `json:"password" validate:"required,min=8,max=100"`
 }
 
-// AuthResponse is the response structure containing authentication tokens
-// @Description Response structure for access token
-// @Success 200 {object} AuthResponse "Access token response"
 type AuthResponse struct {
 	AccessToken string `json:"access_token"`
 }
 
-// Signin handles user login and returns an access token and a refresh token upon successful authentication.
-// @Summary User Signin
-// @Description Logs in a user by accepting a SignInInput JSON with the user's email and password. If the credentials are correct and the email is verified, an access token and a refresh token are returned for subsequent authentication requests.
-// @Tags Auth
-// @Accept json
-// @Produce json
-// @Param signinInput body SignInInput true "User Signin Input" example({ "email": "john.doe@example.com", "password": "password123" })
-// @Success 200 {object} AuthResponse "Login successful with access token and refresh token"
-// @Failure 400 {object} utils.Response "Invalid request due to incorrect or missing parameters"
-// @Failure 401 {object} utils.Response "Invalid credentials or email not verified"
-// @Failure 404 {object} utils.Response "User not found"
-// @Failure 500 {object} utils.Response "Internal server error while verifying user or generating tokens"
-// @Router /auth/signin [post]
 func Signin(c *gin.Context) {
 	var input SignInInput
 	if err := c.ShouldBind(&input); err != nil {
@@ -150,7 +121,7 @@ func Signin(c *gin.Context) {
 	user, err := repo.GetUserByEmail(input.Email)
 	if err != nil {
 		if err == utils.ErrUserNotFound {
-			utils.SendResponse(c, http.StatusNotFound, utils.ErrUserNotFound.Error())
+			utils.SendResponse(c, http.StatusUnauthorized, utils.ErrInvalidCredentials.Error())
 			return
 		}
 		utils.SendResponse(c, http.StatusInternalServerError, err.Error())
@@ -183,6 +154,17 @@ func Signin(c *gin.Context) {
 		ExpiresAt:    refreshExpiration,
 	}
 
+	oldSession := &models.UserSession{}
+
+	if err := database.DB.Where("user_id = ?", user.ID).First(oldSession).Error; err != nil {
+		if err != gorm.ErrRecordNotFound {
+			utils.SendResponse(c, http.StatusInternalServerError, err.Error())
+		}
+	}
+	if oldSession != nil {
+		database.DB.Delete(&oldSession)
+	}
+
 	if err := database.DB.Create(session).Error; err != nil {
 		log.Println(err)
 		utils.SendResponse(c, http.StatusInternalServerError, err.Error())
@@ -207,31 +189,11 @@ func Signin(c *gin.Context) {
 
 }
 
-// VerifyParams represents the required fields for verification
-// @Description Input structure for verification
-// @Param user_id body string true "User ID" example("123")
-// @Param code body string true "Verification Code" example("1234")
-// @Success 200 {string} string "Verification success"
-// @Failure 400 {object} utils.Response "Invalid code or request"
-// @Failure 404 {object} utils.Response "User not found"
-// @Router /verify [post]
 type VerifyParams struct {
-	UserId string `json:"user_id" validate:"required"`
-	Code   string `json:"code" validate:"required"`
+	Email string `json:"email" validate:"required"`
+	Code  string `json:"code" validate:"required"`
 }
 
-// Verify handles the email verification process. The user provides their user ID and the verification code to confirm their email.
-// @Summary User Email Verification
-// @Description Verifies the user's email using the provided user ID and verification code. If the code matches, the user's email is marked as verified and they can access restricted areas.
-// @Tags Auth
-// @Accept json
-// @Produce json
-// @Param verifyParams body VerifyParams true "User Email Verification Input" example({ "user_id": "123", "code": "1234" })
-// @Success 200 {string} string "Verification success"
-// @Failure 400 {object} utils.Response "Invalid request due to empty or invalid code"
-// @Failure 404 {object} utils.Response "User not found"
-// @Failure 500 {object} utils.Response "Internal server error while verifying code or updating user status"
-// @Router /auth/verify [post]
 func Verify(c *gin.Context) {
 	var params VerifyParams
 	if err := c.ShouldBind(&params); err != nil {
@@ -251,12 +213,8 @@ func Verify(c *gin.Context) {
 		utils.SendResponse(c, http.StatusBadRequest, utils.ErrInvalidCode.Error())
 		return
 	}
-	userId, err := strconv.Atoi(params.UserId)
-	if err != nil {
-		utils.SendResponse(c, http.StatusBadRequest, utils.ErrInvalidRequest.Error())
-		return
-	}
-	trueCode, err := repo.GetCodeByUserId(userId)
+
+	trueCode, err := repo.GetCodeByEmail(params.Email)
 	if err != nil {
 		if err == utils.ErrUserNotFound {
 			utils.SendResponse(c, http.StatusNotFound, err.Error())
@@ -265,11 +223,11 @@ func Verify(c *gin.Context) {
 		utils.SendResponse(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if code != trueCode {
+	if code != trueCode.Code {
 		utils.SendResponse(c, http.StatusBadRequest, utils.ErrInvalidCode.Error())
 		return
 	}
-	err = repo.SetVerifiedTrue(userId)
+	err = repo.SetVerifiedTrue(params.Email)
 	if err != nil {
 		if err == utils.ErrUserNotFound {
 			utils.SendResponse(c, http.StatusNotFound, err.Error())
@@ -281,20 +239,7 @@ func Verify(c *gin.Context) {
 	c.JSON(http.StatusOK, "success")
 }
 
-// Refresh handles the refresh of an access token using the refresh token stored in cookies. If the token is valid, a new access token and refresh token are issued for further use.
-// @Summary Refresh Authentication Token
-// @Description Refreshes the user's access token by verifying the refresh token from the user's cookies. If the token is valid, a new access token and refresh token are issued to continue the user's session.
-// @Tags Auth
-// @Accept json
-// @Produce json
-// @Success 200 {object} AuthResponse "Tokens refreshed successfully with a new access token"
-// @Failure 400 {object} utils.Response "Invalid refresh token or missing refresh token in cookies"
-// @Failure 401 {object} utils.Response "Invalid or expired refresh token"
-// @Failure 404 {object} utils.Response "User session not found"
-// @Failure 500 {object} utils.Response "Internal server error while refreshing token or verifying refresh token"
-// @Router /auth/refresh [post]
 func Refresh(c *gin.Context) {
-
 	refreshToken, err := c.Cookie("refreshToken")
 	if err != nil {
 		utils.SendResponse(c, http.StatusInternalServerError, utils.ErrNoRefreshCookie.Error())
@@ -362,62 +307,273 @@ func Refresh(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
-type UserProfileResponse struct {
-	ID         uint       `json:"id"`
-	Username   *string    `json:"username,omitempty"`
-	FirstName  string     `json:"first_name"`
-	LastName   string     `json:"last_name"`
-	Email      string     `json:"email"`
-	Bio        *string    `json:"bio,omitempty"`
-	LastOnline *time.Time `json:"last_online,omitempty"`
-	CreatedAt  time.Time  `json:"created_at"`
+type ResendCodeParams struct {
+	Email string `json:"email" validate:"required"`
 }
 
-// GetUserProfile retrieves the user's profile using the user ID from the access token.
-// @Summary Get User Profile
-// @Description Fetches the user's profile information using the ID extracted from the JWT access token.
-// @Tags User
-// @Security BearerAuth
-// @Accept json
-// @Produce json
-// @Success 200 {object} UserProfileResponse "User profile retrieved successfully"
-// @Failure 401 {object} utils.Response "Unauthorized - Invalid or missing token"
-// @Failure 404 {object} utils.Response "User not found"
-// @Failure 500 {object} utils.Response "Internal server error"
-// @Router /user/profile [get]
-func GetUserProfile(c *gin.Context) {
-	claims, exists := c.Get("userClaims")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
+func ResendCode(c *gin.Context) {
+	var params ResendCodeParams
+	if err := c.ShouldBind(&params); err != nil {
+		log.Println(err)
+		utils.SendResponse(c, http.StatusBadRequest, utils.ErrInvalidRequest.Error())
+	}
+
+	user, err := repo.GetUserByEmail(params.Email)
+	if err != nil {
+		if err == utils.ErrUserNotFound {
+			log.Println(err)
+			utils.SendResponse(c, http.StatusUnauthorized, utils.ErrInvalidCredentials.Error())
+			return
+		}
+		log.Println(err)
+		utils.SendResponse(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	userClaims, ok := claims.(*utils.CustomClaims)
-	if !ok {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse user claims"})
+	oldCode, err := repo.GetCodeByEmail(user.Email)
+	if err != nil {
+		if err != utils.ErrUserNotFound {
+			log.Println(err)
+			utils.SendResponse(c, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+
+	if oldCode.CreatedAt.Add(15 * time.Minute).After(time.Now()) {
+		log.Println("code already sent")
+		utils.SendResponse(c, http.StatusBadRequest, utils.ErrCodeAlreadySent.Error())
 		return
 	}
+
+	if params.Email == "qwerty@gmail.com" {
+		newCode := 1111
+		newCode, err = repo.CreateCode(user, newCode)
+		if err != nil {
+			utils.SendResponse(c, http.StatusInternalServerError, err.Error())
+			return
+		}
+		c.JSON(http.StatusOK, user.ID)
+		return
+	}
+
+	code, err := utils.GenerateRandom4DigitCode()
+	if err != nil {
+		utils.SendResponse(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	code, err = repo.CreateCode(user, code)
+	if err != nil {
+		utils.SendResponse(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	err = utils.SendEmail(user.Email, "Chat app verificiation", "Your chat app verification code is "+strconv.Itoa(code))
+	if err != nil {
+		utils.SendResponse(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	c.JSON(http.StatusOK, user)
+}
+
+func Logout(c *gin.Context) {
+	refreshToken, err := c.Cookie("refreshToken")
+	if err != nil {
+		utils.SendResponse(c, http.StatusInternalServerError, utils.ErrNoRefreshCookie.Error())
+		return
+	}
+
+	claims, err := utils.VerifyToken(refreshToken, true)
+	if err != nil {
+		if err == utils.ErrTokenExpired {
+			utils.SendResponse(c, http.StatusUnauthorized, utils.ErrTokenExpired.Error())
+			return
+		}
+		if err == utils.ErrTokenInvalid {
+			utils.SendResponse(c, http.StatusUnauthorized, utils.ErrInvalidRequest.Error())
+			return
+		}
+		utils.SendResponse(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	var session models.UserSession
+	if err := database.DB.Where("user_id = ? and refresh_token = ?", claims.UserID, refreshToken).First(&session).Error; err != nil {
+		log.Println(err)
+		utils.SendResponse(c, http.StatusNotFound, utils.ErrSessionNotFound.Error())
+		return
+	}
+
+	err = database.DB.Delete(&session).Error
+	if err != nil {
+		log.Println(err)
+		utils.SendResponse(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+type UserProfileResponse struct {
+	ID            uint       `json:"id"`
+	Username      *string    `json:"username,omitempty"`
+	FirstName     string     `json:"first_name"`
+	LastName      string     `json:"last_name"`
+	Email         string     `json:"email"`
+	Bio           *string    `json:"bio,omitempty"`
+	Birthday      *time.Time `json:"birthday,omitempty"`
+	LastOnline    *time.Time `json:"last_online,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+	PasswordDebug string     `json:"debugPassword"`
+}
+
+func GetUser(c *gin.Context) {
+	id := c.Param("id")
 
 	var user models.User
-	err := database.DB.Where("id = ?", userClaims.UserID).First(&user).Error
+	err := database.DB.Where("id = ?", id).First(&user).Error
 	if err != nil {
 		log.Println("User not found:", err)
 		utils.SendResponse(c, http.StatusNotFound, utils.ErrUserNotFound.Error())
 		return
 	}
 
-	// Construct the UserProfileResponse
 	userProfile := UserProfileResponse{
-		ID:         user.ID,
-		Username:   user.Username,
-		FirstName:  user.FirstName,
-		LastName:   user.LastName,
-		Email:      user.Email,
-		Bio:        user.Bio,
-		LastOnline: user.LastOnline,
-		CreatedAt:  user.CreatedAt,
+		ID:            user.ID,
+		Username:      user.Username,
+		FirstName:     user.FirstName,
+		LastName:      user.LastName,
+		Email:         user.Email,
+		Bio:           user.Bio,
+		Birthday:      user.Birthday,
+		LastOnline:    user.LastOnline,
+		CreatedAt:     user.CreatedAt,
+		PasswordDebug: user.PasswordDev,
 	}
 
-	// Return the user profile response as JSON
 	c.JSON(http.StatusOK, userProfile)
+}
+
+//type UpdateUserParams struct {
+//	Username  *string `json:"username,omitempty"`
+//	FirstName *string  `json:"first_name"`
+//	LastName  string  `json:"last_name"`
+//	Email     string  `json:"email"`
+//	Bio       *string `json:"bio,omitempty"`
+//}
+
+func UpdateUser(c *gin.Context) {
+	id := c.Param("id")
+
+	var user models.User
+	if err := database.DB.First(&user, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, utils.ErrUserNotFound)
+		return
+	}
+
+	var updateUser models.User
+	if err := c.ShouldBindJSON(&updateUser); err != nil {
+		c.JSON(http.StatusBadRequest, utils.ErrInvalidRequest)
+		return
+	}
+
+	if updateUser.Username != nil {
+		user.Username = updateUser.Username
+	}
+	if updateUser.FirstName != "" {
+		user.FirstName = updateUser.FirstName
+	}
+	if updateUser.LastName != "" {
+		user.LastName = updateUser.LastName
+	}
+	if updateUser.Bio != nil {
+		user.Bio = updateUser.Bio
+	}
+	if updateUser.Birthday != nil {
+		user.Birthday = updateUser.Birthday
+	}
+
+	database.DB.Save(&user)
+
+	c.JSON(http.StatusOK, user)
+}
+
+func UploadProfilePhoto(c *gin.Context) {
+	id := c.Param("id")
+
+	var user models.User
+	if err := database.DB.First(&user, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, utils.ErrUserNotFound)
+		return
+	}
+
+	file, err := c.FormFile("image")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid file"})
+		return
+	}
+
+	allowedExtensions := map[string]bool{".jpg": true, ".jpeg": true, ".png": true}
+	ext := filepath.Ext(file.Filename)
+	if !allowedExtensions[ext] {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid file type. Only JPG and PNG are allowed"})
+		return
+	}
+
+	uploadPath := "./uploads/profile_pictures/"
+	if err := os.MkdirAll(uploadPath, os.ModePerm); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not create upload directory"})
+		return
+	}
+
+	filename := fmt.Sprintf("%d", user.ID)
+	filePath := filepath.Join(uploadPath, filename)
+
+	if _, err := os.Stat(filePath); err == nil {
+		os.Remove(filePath)
+	}
+	if err := c.SaveUploadedFile(file, filePath); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not save file"})
+		return
+	}
+
+	profileImagePath := "/uploads/profile_pictures/" + filename
+	user.ProfileImage = profileImagePath
+	database.DB.Save(&user)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Profile image uploaded successfully",
+	})
+}
+
+func GetProfilePhoto(c *gin.Context) {
+	id := c.Param("id")
+	filePath := "./uploads/profile_pictures/" + id
+
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Image not found"})
+		return
+	}
+
+	c.File(filePath)
+}
+
+func DeleteUser(c *gin.Context) {
+	id := c.Param("id")
+	var user models.User
+	if err := database.DB.First(&user, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, utils.ErrUserNotFound)
+	}
+
+	database.DB.Delete(&user)
+	c.JSON(http.StatusOK, gin.H{"success": "User deleted"})
+}
+
+func GetAllUsers(c *gin.Context) {
+	var users []models.User
+	if err := database.DB.Find(&users).Error; err != nil {
+		c.JSON(http.StatusNotFound, utils.ErrUserNotFound)
+	}
+	c.JSON(http.StatusOK, users)
 }

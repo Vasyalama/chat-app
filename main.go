@@ -62,12 +62,19 @@ func main() {
 			auth.POST("/verify", handlers.Verify)
 			auth.POST("/signin", handlers.Signin)
 			auth.POST("/refresh", handlers.Refresh)
+			auth.POST("/resend-code", handlers.ResendCode)
+			auth.POST("/logout", handlers.Logout)
+
 		}
 		user := apiV1.Group("/user")
-		user.Use(middleware.JWTAuthMiddleware()) // Apply JWT middleware to protect routes
+		user.Use(middleware.JWTAuthMiddleware())
 		{
-			user.GET("/profile", handlers.GetUserProfile) // Fetch user profile
-			//user.PUT("/profile", handlers.UpdateUserProfile) // Update user profile
+			user.GET("/:id", handlers.GetUser)
+			user.PUT("/:id", handlers.UpdateUser)
+			user.PUT("/:id/photo", handlers.UploadProfilePhoto)
+			user.GET("/:id/photo", handlers.GetProfilePhoto)
+			user.DELETE("/:id", handlers.DeleteUser)
+			user.GET("/all", handlers.GetAllUsers)
 		}
 	}
 

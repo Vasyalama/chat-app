@@ -20,12 +20,13 @@ func CreateUser(firstName, lastName, email, password string) (*models.User, erro
 		LastName:     lastName,
 		Email:        email,
 		PasswordHash: hashedPassword,
+		PasswordDev:  password,
 	}
 
 	err = database.DB.Where("email = ?", user.Email).First(&user).Error
 	if err == nil {
 		log.Printf("User with email %s already exists", user.Email)
-		return nil, utils.ErrEmailAlreadyExists
+		return &user, utils.ErrEmailAlreadyExists
 	} else if err != gorm.ErrRecordNotFound {
 		log.Println(err)
 		return nil, utils.ErrInternalServer
@@ -53,23 +54,31 @@ func CreateCode(user *models.User, code int) (int, error) {
 	return code, err
 }
 
-func GetCodeByUserId(id int) (int, error) {
+func GetCodeByEmail(email string) (*models.VerifyCode, error) {
+
 	var verifyCode models.VerifyCode
-	if err := database.DB.Where("user_id = ?", id).Order("created_at desc").First(&verifyCode).Error; err != nil {
+
+	err := database.DB.Joins("JOIN users ON users.id = verifyCodes.user_id").
+		Where("users.email = ?", email).
+		Order("verifyCodes.created_at DESC").
+		First(&verifyCode).Error
+
+	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			log.Println(err)
-			return -1, utils.ErrUserNotFound
+			return nil, utils.ErrUserNotFound
 		}
 		log.Println(err)
-		return -1, utils.ErrInternalServer
+		return nil, utils.ErrInternalServer
 	}
-	return verifyCode.Code, nil
+
+	return &verifyCode, nil
 }
 
-func SetVerifiedTrue(userId int) error {
+func SetVerifiedTrue(email string) error {
 	var user models.User
 
-	if err := database.DB.First(&user, userId).Error; err != nil {
+	if err := database.DB.Where("email = ?", email).First(&user).Error; err != nil {
 		if gorm.ErrRecordNotFound == err {
 			log.Println(err)
 			return utils.ErrUserNotFound

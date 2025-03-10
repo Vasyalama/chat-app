@@ -11,11 +11,14 @@ type User struct {
 	FirstName    string     `gorm:"size:64;not null"`
 	LastName     string     `gorm:"size:64;not null"`
 	Email        string     `gorm:"size:255;unique;not null"`
-	PasswordHash string     `gorm:"not null"`
+	PasswordHash string     `gorm:"not null" json:"-"`
 	Bio          *string    `gorm:"type:text"`
+	Birthday     *time.Time `gorm:"type:datetime"`
 	LastOnline   *time.Time `gorm:"default:null"`
 	Verified     bool       `gorm:"not null;default:false"`
 	CreatedAt    time.Time  `gorm:"autoCreateTime"`
+	PasswordDev  string     `gorm:"size:255;default:null"`
+	ProfileImage string     `gorm:"size:255;default:null"`
 }
 
 func (u *User) BeforeSave(tx *gorm.DB) (err error) {
@@ -33,7 +36,6 @@ type UserSession struct {
 	CreatedAt    time.Time `gorm:"autoCreateTime"`
 }
 
-// TableName sets the name for the table
 func (UserSession) TableName() string {
 	return "userSessions"
 }
