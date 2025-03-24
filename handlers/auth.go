@@ -70,22 +70,23 @@ func Signup(c *gin.Context) {
 	}
 create:
 	//костыль для разработки
-	if user.Email == "qwerty@gmail.com" {
-		otpCode := 1111
-		otpCode, err = repo.CreateCode(user, otpCode)
-		if err != nil {
-			utils.SendResponse(c, http.StatusInternalServerError, err.Error())
-			return
-		}
-		c.JSON(http.StatusCreated, user)
-		return
-	}
+	//if user.Email == "qwerty@gmail.com" {
+	//	otpCode := 1111
+	//	otpCode, err = repo.CreateCode(user, otpCode)
+	//	if err != nil {
+	//		utils.SendResponse(c, http.StatusInternalServerError, err.Error())
+	//		return
+	//	}
+	//	c.JSON(http.StatusCreated, user)
+	//	return
+	//}
 
-	code, err := utils.GenerateRandom4DigitCode()
-	if err != nil {
-		utils.SendResponse(c, http.StatusInternalServerError, err.Error())
-		return
-	}
+	//code, err := utils.GenerateRandom4DigitCode()
+	//if err != nil {
+	//	utils.SendResponse(c, http.StatusInternalServerError, err.Error())
+	//	return
+	//}
+	code := 1111
 
 	code, err = repo.CreateCode(user, code)
 	if err != nil {
@@ -345,22 +346,23 @@ func ResendCode(c *gin.Context) {
 		return
 	}
 
-	if params.Email == "qwerty@gmail.com" {
-		newCode := 1111
-		newCode, err = repo.CreateCode(user, newCode)
-		if err != nil {
-			utils.SendResponse(c, http.StatusInternalServerError, err.Error())
-			return
-		}
-		c.JSON(http.StatusOK, user.ID)
-		return
-	}
-
-	code, err := utils.GenerateRandom4DigitCode()
-	if err != nil {
-		utils.SendResponse(c, http.StatusInternalServerError, err.Error())
-		return
-	}
+	//if params.Email == "qwerty@gmail.com" {
+	//	newCode := 1111
+	//	newCode, err = repo.CreateCode(user, newCode)
+	//	if err != nil {
+	//		utils.SendResponse(c, http.StatusInternalServerError, err.Error())
+	//		return
+	//	}
+	//	c.JSON(http.StatusOK, user.ID)
+	//	return
+	//}
+	//
+	//code, err := utils.GenerateRandom4DigitCode()
+	//if err != nil {
+	//	utils.SendResponse(c, http.StatusInternalServerError, err.Error())
+	//	return
+	//}
+	code := 1111
 
 	code, err = repo.CreateCode(user, code)
 	if err != nil {
